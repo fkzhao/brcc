@@ -20,7 +20,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # reinstall jar
-mvn -e clean install -Dmaven.test.skip=true
+mvn -e clean install -Dgpg.skip -Dmaven.test.skip=true
 
 # shellcheck disable=SC2006
 ver="v1.0.0"
