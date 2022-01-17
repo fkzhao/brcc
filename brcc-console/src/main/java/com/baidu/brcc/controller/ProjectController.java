@@ -19,6 +19,8 @@
 package com.baidu.brcc.controller;
 
 
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PARAM_ERROR_STATUS;
@@ -34,6 +36,8 @@ import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_ID_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_ID_NOT_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_NAME_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_NAME_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_NAME_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_NAME_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_NOT_EXISTS_MSG;
@@ -42,6 +46,8 @@ import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_REF_ID_NOT_EXISTS_MSG
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_REF_ID_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_TYPE_NOT_AVAILABLE_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_TYPE_NOT_AVAILABLE_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.TYPE_NULL_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.TYPE_NULL_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.USERID_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.USERID_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.USER_NOT_EXISTS_MSG;
@@ -58,8 +64,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import com.baidu.brcc.domain.vo.ResetApiPasswordVo;
+import com.baidu.brcc.utils.Name.NameUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -120,7 +128,7 @@ import lombok.extern.slf4j.Slf4j;
  * 工程相关接口
  */
 @RestController
-@RequestMapping("project")
+@RequestMapping("console/project")
 @Slf4j
 public class ProjectController {
 
@@ -158,7 +166,6 @@ public class ProjectController {
      * 保存工程
      *
      * @param req
-     *
      * @return
      */
     @SaveLog(scene = "0009",
@@ -166,20 +173,27 @@ public class ProjectController {
             params = {"req"}
     )
     @PostMapping("save")
-    public R addProject(@RequestBody ProjectReq req, @RequestParam(defaultValue = "0") String apiPassword, @LoginUser User user) {
+    public R addProject(@RequestBody ProjectReq req, @RequestParam(required = false) String apiPassword, @LoginUser User user) {
         if (user == null) {
             return R.error(NON_LOGIN_STATUS, NON_LOGIN_MSG);
         }
         Long id = req.getId();
         String name = trim(req.getName());
+        if (NameUtils.containsChinese(name)) {
+            return R.error(CHINESE_NOT_ALLOWED_STATUS, CHINESE_NOT_ALLOWED_MSG);
+        }
         Date now = DateTimeUtils.now();
         Byte projectType = req.getProjectType();
-        if (projectType != null && !ProjectType.PRIVATE.getValue().equals(projectType) && !ProjectType.PUBLIC.getValue()
+        if (projectType == null) {
+            return R.error(TYPE_NULL_STATUS, TYPE_NULL_MSG);
+        }
+        if (!ProjectType.PRIVATE.getValue().equals(projectType) && !ProjectType.PUBLIC.getValue()
                 .equals(projectType)) {
             return R.error(PROJECT_TYPE_NOT_AVAILABLE_STATUS, PROJECT_TYPE_NOT_AVAILABLE_MSG);
         }
         String cacheEvictProjectName = null;
         List<String> cacheEvictApiTokens = null;
+        String token = UUID.randomUUID().toString().replace("-", "");
         if (id != null && id > 0) {
             // 修改
             Project project = projectService.selectByPrimaryKey(id,
@@ -211,25 +225,35 @@ public class ProjectController {
                         MetaProject.COLUMN_NAME_ID
                 );
                 if (exists != null) {
-                    return R.error(PROJECT_EXISTS_STATUS, PROJECT_EXISTS_MSG);
+                    return R.error(PROJECT_NAME_EXISTS_STATUS, PROJECT_NAME_EXISTS_MSG);
                 }
                 update.setName(name);
             }
             update.setMailReceiver(req.getMailReceiver());
             update.setMemo(req.getMemo());
             update.setProjectType(projectType);
+            if (isNotBlank(apiPassword)) {
+                update.setApiPassword(Md5Util.md5(apiPassword));
+                update.setApiToken(token);
+            }
             projectService.updateByPrimaryKeySelective(update);
 
             cacheEvictApiTokens = new ArrayList<>();
-            if (!StringUtils.equals(name, project.getName())) {
-                // 修改了名称
+            if (!StringUtils.equals(name, project.getName()) || isNotBlank(apiPassword)) {
                 List<ApiToken> apiTokens = apiTokenService.selectByProjectId(
                         project.getId(),
                         MetaApiToken.COLUMN_NAME_ID,
                         MetaApiToken.COLUMN_NAME_TOKEN
                 );
                 for (ApiToken apiToken : apiTokens) {
-                    apiToken.setProjectName(name);
+                    // 若修改了名称
+                    if (!StringUtils.equals(name, project.getName())) {
+                        apiToken.setProjectName(name);
+                    }
+                    // 若修改了API密码
+                    if (isNotBlank(apiPassword)) {
+                        apiToken.setToken(token);
+                    }
                     apiToken.setUpdateTime(new Date());
                     apiTokenService.updateByPrimaryKeySelective(apiToken);
                     cacheEvictApiTokens.add(apiToken.getToken());
@@ -244,7 +268,7 @@ public class ProjectController {
             if (isBlank(name)) {
                 return R.error(PROJECT_NAME_NOT_EXISTS_STATUS, PROJECT_NAME_NOT_EXISTS_MSG);
             }
-            if (isBlank(apiPassword)) {
+            if (apiPassword == null || isBlank(apiPassword)) {
                 return R.error(PROJECT_API_PASSWORD_NOT_EXISTS_STATUS, PROJECT_API_PASSWORD_NOT_EXISTS_MSG);
             }
             Product product = productService.selectByPrimaryKey(productId);
@@ -265,11 +289,10 @@ public class ProjectController {
                     MetaProject.COLUMN_NAME_ID
             );
             if (project != null) {
-                return R.error(PROJECT_EXISTS_STATUS, PROJECT_EXISTS_MSG);
+                return R.error(PROJECT_NAME_EXISTS_STATUS, PROJECT_NAME_EXISTS_MSG);
             }
 
             String pwd = Md5Util.md5(apiPassword);
-            String token = UUID.randomUUID().toString().replace("-", "");
             Project insert = new Project();
             insert.setUpdateTime(now);
             insert.setCreateTime(now);
@@ -306,7 +329,7 @@ public class ProjectController {
     @SaveLog(scene = "0010",
             paramsIdxes = {0},
             params = {"projectId"}
-            )
+    )
     @PostMapping("/resetApiPassword/{projectId}")
     public R resetApiPassword(@PathVariable("projectId") Long projectId, @LoginUser User loginUser,
                               @RequestBody ResetApiPasswordVo resetApiPassword) {
@@ -395,7 +418,6 @@ public class ProjectController {
      * 获取工程list
      *
      * @param productId
-     *
      * @return
      */
     @GetMapping("list")
@@ -465,6 +487,10 @@ public class ProjectController {
                     ProjectListVo projectListVo = new ProjectListVo().copyFrom(item);
                     boolean isAdmin = adminProjectMap.containsKey(item.getId());
                     projectListVo.setAdmin(isAdmin ? Boolean.TRUE : canManage);
+                    projectListVo.setMembers(projectUserService.selectUsersByProjectIdAndType(item.getId(),
+                            ProjectUserAdmin.NO.getValue()));
+                    projectListVo.setManagers(projectUserService.selectUsersByProjectIdAndType(item.getId(),
+                            ProjectUserAdmin.YES.getValue()));
                     return projectListVo;
                 }
         );
@@ -474,6 +500,14 @@ public class ProjectController {
         return R.ok(pagination, ext);
     }
 
+    /**
+     * add project dependency
+     *
+     * @param refProjectDto
+     * @param user
+     * @param projectId
+     * @return
+     */
     @SaveLog(scene = "0012",
             paramsIdxes = {0, 1},
             params = {"projectId", "refProjectDto"})
@@ -528,7 +562,6 @@ public class ProjectController {
      * @param projectId
      * @param projectUserDto
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0013",
@@ -639,7 +672,6 @@ public class ProjectController {
      * @param projectId
      * @param userIds
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0014",
@@ -679,7 +711,6 @@ public class ProjectController {
      * 获取成员列表
      *
      * @param projectId
-     *
      * @return
      */
     @GetMapping("getMemberList")

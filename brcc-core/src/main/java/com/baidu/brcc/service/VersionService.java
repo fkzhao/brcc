@@ -46,11 +46,15 @@ public interface VersionService extends GenericService<Version, Long, VersionExa
 
     Boolean checkAuth(User user, Long srcVerId, Long destVerId);
 
+    Boolean checkAuths(User user, Long versionId, List<Long> depIds);
+
     void copyConfigItemsFromVersion(Long srcVerId, Long destVerId);
 
     void copyConfigItemsFromGroup(Long srcGroupId, ConfigGroup destGroup);
 
     List<VersionNodeVo> myAllVersion(User user, Long productId, Long projectId);
+
+    List<VersionNodeVo> myCommonVersion(User user, Long productId, Long projectId, Long versionId);
 
     Version selectByProjectIdAndEnvironmentIdAndName(Long projectId, Long environmentId, String name);
 
@@ -63,4 +67,10 @@ public interface VersionService extends GenericService<Version, Long, VersionExa
     ApiVersionVo getByEnvironmentAndNameInCache(Long projectId, Long environmentId, String versionName);
 
     List<ApiVersionVo> getAllByEnvironmentIdInCache(Long projectId, Long environmentId);
+
+    List<Version> selectByEnvironmentId(Long environmentId);
+
+    List<String> getDepInfosByDepIds(List<Long> depIds);
+
+    List<Long> getChildrenVersionById(Long versionId);
 }

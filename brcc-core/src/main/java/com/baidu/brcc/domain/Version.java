@@ -1,7 +1,26 @@
+/*
+ * Copyright (c) Baidu Inc. All rights reserved.
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.baidu.brcc.domain;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
 
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
@@ -108,6 +127,13 @@ public class Version implements Serializable {
     private Long mainVersionId;
 
     /**
+     * column-name:dependency_ids
+     * dependencyIds
+     */
+    @ApiModelProperty(value = "依赖的版本ID列表", position = 14)
+    private String dependencyIds;
+
+    /**
      * 版本
      */
     public Version() {
@@ -132,6 +158,7 @@ public class Version implements Serializable {
         this.createTime = builder.createTime;
         this.grayFlag = builder.grayFlag;
         this.mainVersionId = builder.mainVersionId;
+        this.dependencyIds = builder.dependencyIds;
     }
 
     public static XBuilder newBuilder() {
@@ -334,6 +361,14 @@ public class Version implements Serializable {
         this.mainVersionId = mainVersionId;
     }
 
+    public String getDependencyIds() {
+        return dependencyIds;
+    }
+
+    public void setDependencyIds(String dependencyIds) {
+        this.dependencyIds = dependencyIds;
+    }
+
     public Version copyFrom(Version other) {
         this.id = other.id;
         this.name = other.name;
@@ -349,11 +384,12 @@ public class Version implements Serializable {
         this.createTime = other.createTime;
         this.grayFlag = other.grayFlag;
         this.mainVersionId = other.mainVersionId;
+        this.dependencyIds = other.dependencyIds;
         return this;
     }
 
     public static <T extends Version> T copyFrom(Version from, T to) {
-        if (to == null){
+        if (to == null) {
             throw new RuntimeException("`to` must not be null");
         }
         to.setId(from.id);
@@ -370,6 +406,7 @@ public class Version implements Serializable {
         to.setCreateTime(from.createTime);
         to.setGrayFlag(from.grayFlag);
         to.setMainVersionId(from.mainVersionId);
+        to.setDependencyIds(from.dependencyIds);
         return to;
     }
 
@@ -391,7 +428,7 @@ public class Version implements Serializable {
         }
         */
 
-        return "{\"id\": \"\",\"name\": \"\",\"productId\": \"\",\"memo\": \"\",\"projectId\": \"\",\"environmentId\": \"\",\"checkSum\": \"\",\"checkSumDate\": \"\",\"checkSumEnable\": \"\",\"deleted\": \"\",\"updateTime\": \"\",\"createTime\": \"\",\"grayFlag\": \"\",\"mainVersionId\": \"\"}" ;
+        return "{\"id\": \"\",\"name\": \"\",\"productId\": \"\",\"memo\": \"\",\"projectId\": \"\",\"environmentId\": \"\",\"checkSum\": \"\",\"checkSumDate\": \"\",\"checkSumEnable\": \"\",\"deleted\": \"\",\"updateTime\": \"\",\"createTime\": \"\",\"grayFlag\": \"\",\"mainVersionId\": \"\",\"dependencyIds\": \"\"}";
     }
 
     @Override
@@ -414,6 +451,7 @@ public class Version implements Serializable {
         sb.append(", createTime=").append(createTime);
         sb.append(", grayFlag=").append(grayFlag);
         sb.append(", mainVersionId=").append(mainVersionId);
+        sb.append(", dependencyIds=").append(dependencyIds);
         sb.append("]");
         return sb.toString();
     }
@@ -489,6 +527,11 @@ public class Version implements Serializable {
          * mainVersionId
          */
         private Long mainVersionId;
+
+        /**
+         * dependencyIds
+         */
+        private String dependencyIds;
 
 
         private XBuilder() {
@@ -604,6 +647,11 @@ public class Version implements Serializable {
          */
         public XBuilder mainVersionId(Long mainVersionId) {
             this.mainVersionId = mainVersionId;
+            return this;
+        }
+
+        public XBuilder dependencyIds(String dependencyIds) {
+            this.dependencyIds = dependencyIds;
             return this;
         }
 

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) Baidu Inc. All rights reserved.
- * 
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
@@ -55,8 +55,8 @@ public class ConfigChangeLogServiceImpl extends GenericServiceImpl<ConfigChangeL
 
     static {
         executor.setThreadNamePrefix("save-config-change-log-");
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(2);
+        executor.setCorePoolSize(Runtime.getRuntime().availableProcessors());
+        executor.setMaxPoolSize(Runtime.getRuntime().availableProcessors()*2);
         // 设置队列容量
         executor.setQueueCapacity(5000);
         // 是否关闭的时候等待任务执行结束

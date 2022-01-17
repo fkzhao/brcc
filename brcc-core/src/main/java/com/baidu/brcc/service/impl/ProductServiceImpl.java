@@ -18,7 +18,18 @@
  */
 package com.baidu.brcc.service.impl;
 
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRODUCT_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRODUCT_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRODUCT_NAME_EMPTY_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRODUCT_NAME_EMPTY_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRODUCT_NOT_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.PRODUCT_NOT_EXISTS_STATUS;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
+import static org.apache.commons.lang3.StringUtils.trim;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -29,6 +40,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.baidu.brcc.domain.base.R;
+import com.baidu.brcc.domain.exception.BizException;
+import com.baidu.brcc.domain.meta.MetaProject;
+import com.baidu.brcc.utils.Name.NameUtils;
+import com.baidu.brcc.utils.time.DateTimeUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -113,6 +130,7 @@ public class ProductServiceImpl extends GenericServiceImpl<Product, Long, Produc
         boolean isAdmin = UserRole.SYSADMIN.getValue().equals(user.getRole());
 
         Set<Long> productIds = null;
+        // 不是系统管理员
         if (!isAdmin) {
             List<ProductUser> products = productUserService.selectByExample(ProductUserExample.newBuilder()
                             .build()
@@ -249,5 +267,61 @@ public class ProductServiceImpl extends GenericServiceImpl<Product, Long, Produc
                 .andNameEqualTo(name)
                 .toExample()
         );
+    }
+
+    @Override
+    public Long saveProduct(Product product, User user) {
+        Long id = product.getId();
+        String name = trim(product.getName());
+        if (NameUtils.containsChinese(name)) {
+            throw new BizException(CHINESE_NOT_ALLOWED_STATUS, CHINESE_NOT_ALLOWED_MSG);
+        }
+        Date now = DateTimeUtils.now();
+        if (id != null && id > 0) {
+            // 修改
+            Product exist = selectByPrimaryKey(id);
+            if (exist == null) {
+                throw new BizException(PRODUCT_NOT_EXISTS_STATUS, PRODUCT_NOT_EXISTS_MSG);
+            }
+
+            if (!productUserService.checkAuth(id, user)) {
+                 throw new BizException(PRIV_MIS_STATUS, PRIV_MIS_MSG);
+            }
+            product.setUpdateTime(now);
+            if (StringUtils.isNotBlank(name)) {
+                Product exists = selectOneByExample(ProductExample.newBuilder()
+                                .build()
+                                .createCriteria()
+                                .andIdNotEqualTo(id)
+                                .andNameEqualTo(name)
+                                .toExample(),
+                        MetaProduct.COLUMN_NAME_ID
+                );
+                if (exists != null) {
+                    throw new BizException(PRODUCT_EXISTS_STATUS, PRODUCT_EXISTS_MSG);
+                }
+            }
+            updateByPrimaryKeySelective(product);
+        } else {
+            // 新增
+            if (StringUtils.isBlank(name)) {
+                throw new BizException(PRODUCT_NAME_EMPTY_STATUS, PRODUCT_NAME_EMPTY_MSG);
+            }
+            Product item = selectOneByExample(ProductExample.newBuilder()
+                            .build()
+                            .createCriteria()
+                            .andNameEqualTo(name)
+                            .toExample(),
+                    MetaProject.COLUMN_NAME_ID
+            );
+            if (item != null) {
+                throw new BizException(PRODUCT_EXISTS_STATUS, PRODUCT_EXISTS_MSG);
+            }
+            product.setUpdateTime(now);
+            product.setCreateTime(now);
+            insertSelective(product);
+            id = product.getId();
+        }
+        return id;
     }
 }

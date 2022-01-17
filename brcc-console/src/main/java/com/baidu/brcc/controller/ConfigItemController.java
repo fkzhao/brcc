@@ -40,11 +40,13 @@ import static org.apache.commons.lang3.StringUtils.isBlank;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.apache.commons.lang3.StringUtils.trim;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.baidu.brcc.domain.em.ProjectType;
 import com.baidu.brcc.domain.vo.ApiItemVo;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -91,7 +93,7 @@ import com.baidu.brcc.utils.time.DateTimeUtils;
  * 管理端配置项相关接口
  */
 @RestController
-@RequestMapping("item")
+@RequestMapping("console/item")
 public class ConfigItemController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigItemController.class);
@@ -137,7 +139,6 @@ public class ConfigItemController {
      *
      * @param req  req.id > 0 表示修改配置，否则新增
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0000",
@@ -267,7 +268,12 @@ public class ConfigItemController {
         }
 
         if (cacheEvictVersionId != null && cacheEvictVersionId > 0) {
-            rccCache.evictConfigItem(cacheEvictVersionId);
+            List<Long> versionIds = new ArrayList<>();
+            versionIds.add(cacheEvictVersionId);
+            if (projectService.selectByPrimaryKey(groupService.selectByPrimaryKey(req.getGroupId()).getProjectId()).getProjectType().equals(ProjectType.PUBLIC.getValue())) {
+                versionIds.addAll(versionService.getChildrenVersionById(cacheEvictVersionId));
+            }
+            rccCache.evictConfigItem(versionIds);
         }
 
         return R.ok(id);
@@ -278,7 +284,6 @@ public class ConfigItemController {
      *
      * @param itemReq
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0001",
@@ -291,20 +296,16 @@ public class ConfigItemController {
             return R.error(GROUP_ID_NOT_EXISTS_STATUS, GROUP_ID_NOT_EXISTS_MSG);
         }
         ConfigGroup configGroup = groupService.selectByPrimaryKey(groupId);
+        if (configGroup == null || Deleted.DELETE.getValue().equals(configGroup.getDeleted())) {
+            return R.error(GROUP_NOT_EXISTS_STATUS, GROUP_NOT_EXISTS_MSG);
+        }
         if (!CollectionUtils.isEmpty(itemReq.getItems())) {
             for (ItemReq req : itemReq.getItems()) {
                 String name = req.getName();
                 if (StringUtils.isBlank(name)) {
                     return R.error(CONFIG_KEY_NOT_EXISTS_STATUS, CONFIG_KEY_NOT_EXISTS_MSG);
                 }
-               ApiItemVo apiItemVo =  configItemService.getByVersionIdAndName(configGroup.getProjectId(), configGroup.getVersionId(), name);
-                if (apiItemVo !=null && !apiItemVo.getGroupId().equals(groupId)) {
-                    return R.error(CONFIG_ITEM_EXISTS_STATUS, CONFIG_ITEM_EXISTS_MSG);
-                }
             }
-        }
-        if (configGroup == null || Deleted.DELETE.getValue().equals(configGroup.getDeleted())) {
-            return R.error(GROUP_NOT_EXISTS_STATUS, GROUP_NOT_EXISTS_MSG);
         }
         if (!environmentUserService.checkAuth(configGroup.getProductId(), configGroup.getProjectId(),
                 configGroup.getEnvironmentId(), user)) {
@@ -313,7 +314,14 @@ public class ConfigItemController {
         int cnt = configItemService.batchSave(user, itemReq, configGroup);
 
         // 失效版本下的配置
-        rccCache.evictConfigItem(configGroup.getVersionId());
+        if (configGroup.getVersionId() != null && configGroup.getVersionId() > 0) {
+            List<Long> versionIds = new ArrayList<>();
+            versionIds.add(configGroup.getVersionId());
+            if (projectService.selectByPrimaryKey(configGroup.getProjectId()).getProjectType().equals(ProjectType.PUBLIC.getValue())) {
+                versionIds.addAll(versionService.getChildrenVersionById(configGroup.getVersionId()));
+            }
+            rccCache.evictConfigItem(versionIds);
+        }
         return R.ok(cnt);
     }
 
@@ -322,7 +330,6 @@ public class ConfigItemController {
      *
      * @param itemId
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0002",
@@ -374,7 +381,14 @@ public class ConfigItemController {
                 oldConfigMap, newConfigMap, new Date());
 
         // 失效版本下的配置
-        rccCache.evictConfigItem(configItem.getVersionId());
+        if (configItem.getVersionId() != null && configItem.getVersionId() > 0) {
+            List<Long> versionIds = new ArrayList<>();
+            versionIds.add(configItem.getVersionId());
+            if (projectService.selectByPrimaryKey(configItem.getProjectId()).getProjectType().equals(ProjectType.PUBLIC.getValue())) {
+                versionIds.addAll(versionService.getChildrenVersionById(configItem.getVersionId()));
+            }
+            rccCache.evictConfigItem(versionIds);
+        }
 
         return R.ok(cnt);
     }
@@ -384,7 +398,6 @@ public class ConfigItemController {
      *
      * @param groupId
      * @param user
-     *
      * @return
      */
     @GetMapping("list")
@@ -398,6 +411,7 @@ public class ConfigItemController {
         }
         List<ConfigItemForGroupVo> items =
                 configItemService.selectByExample(ConfigItemExample.newBuilder()
+                                .orderByClause("id desc")
                                 .build()
                                 .createCriteria()
                                 .andDeletedEqualTo(Deleted.OK.getValue())
@@ -438,7 +452,6 @@ public class ConfigItemController {
      * @param pageNo
      * @param pageSize
      * @param user
-     *
      * @return
      */
     @GetMapping("query")
@@ -455,7 +468,7 @@ public class ConfigItemController {
 
     ) {
         if (isBlank(val) && isBlank(key)) {
-            return R.error(CONFIG_KEY_VALUE_NOT_EXISTS_STATUS, CONFIG_KEY_VALUE_NOT_EXISTS_MSG);
+            return R.ok(new Pagination<ConfigItemVo>());
         }
         int offset = (pageNo - 1) * pageSize;
         Pagination<ConfigItemVo> pagination =

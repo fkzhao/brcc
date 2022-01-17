@@ -18,9 +18,15 @@
  */
 package com.baidu.brcc.service.impl;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+import com.baidu.brcc.common.Constants;
+import com.baidu.brcc.domain.Product;
+import com.baidu.brcc.domain.exception.BizException;
+import com.baidu.brcc.utils.collections.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -75,7 +81,7 @@ public class ProductUserServiceImpl extends GenericServiceImpl<ProductUser, Long
                         .createCriteria()
                         .andProductIdEqualTo(productId)
                         .toExample(),
-                ProductUser :: getUserId
+                ProductUser::getUserId
         );
     }
 
@@ -98,4 +104,35 @@ public class ProductUserServiceImpl extends GenericServiceImpl<ProductUser, Long
         );
         return productUser != null;
     }
+
+    @Override
+    public String selectProductManagerByProductId(Long productId) {
+        List<ProductUser> productUserList = selectByExample(ProductUserExample.newBuilder()
+                .build()
+                .createCriteria()
+                .andProductIdEqualTo(productId)
+                .andIsAdminEqualTo(ProductUserAdmin.YES.getValue()).toExample());
+        if (productUserList == null || productUserList.size() <= 0) {
+            return null;
+        }
+        StringBuilder name = new StringBuilder();
+        for(ProductUser item : productUserList) {
+            name.append(item.getUserName());
+            name.append(',');
+        }
+        return name.substring(0,name.length() - 1);
+    }
+
+    @Override
+    public List<Long> queryProductsByUserNameAndAdmin(String username, byte isAdmin) {
+        List<ProductUser> productUserList = productUserMapper.queryProductIdsByUserNameAndAdmin(username, isAdmin);
+        if (CollectionUtils.isEmpty(productUserList)) {
+            return new ArrayList<>();
+        }
+        List<Long> productIds = productUserList.stream()
+                .map(ProductUser::getProductId)
+                .collect(Collectors.toList());
+        return productIds;
+    }
+
 }

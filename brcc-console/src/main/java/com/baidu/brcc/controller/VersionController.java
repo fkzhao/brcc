@@ -18,9 +18,17 @@
  */
 package com.baidu.brcc.controller;
 
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONFIG_ITEM_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONFIG_ITEM_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONFIG_KEY_NOT_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONFIG_KEY_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_NOT_EXISTS_STATUS;
 
+import static com.baidu.brcc.common.ErrorStatusMsg.FILE_IS_EMPTY_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.FILE_IS_EMPTY_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.GRAY_RULE_NOT_SET_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.GRAY_RULE_NOT_SET_STATUS;
 
@@ -28,10 +36,16 @@ import static com.baidu.brcc.common.ErrorStatusMsg.GRAY_VERSION_ID_NOT_EXIST_MSG
 import static com.baidu.brcc.common.ErrorStatusMsg.GRAY_VERSION_ID_NOT_EXIST_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.GRAY_VERSION_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.GRAY_VERSION_NOT_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_ID_NOT_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_ID_NOT_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_NOT_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.MAIN_VERSION_ID_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.MAIN_VERSION_ID_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.PARAM_ERROR_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.PARAM_ERROR_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.VERSION_CHANGE_LOG_END_TIME_EMPTY_MSG;
@@ -61,26 +75,52 @@ import static com.baidu.brcc.utils.collections.CollectionUtils.toMapList;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.apache.commons.lang3.StringUtils.trim;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.UUID;
 
+import com.baidu.brcc.common.ErrorStatusMsg;
+import com.baidu.brcc.domain.ConfigGroup;
 import com.baidu.brcc.domain.GrayInfo;
 import com.baidu.brcc.domain.GrayRule;
+import com.baidu.brcc.domain.Project;
 import com.baidu.brcc.domain.VersionExample;
+import com.baidu.brcc.domain.em.FileFormat;
 import com.baidu.brcc.domain.em.GrayFlag;
+import com.baidu.brcc.domain.em.ProjectType;
+import com.baidu.brcc.domain.meta.MetaConfigItem;
+import com.baidu.brcc.domain.vo.ApiItemVo;
+import com.baidu.brcc.domain.vo.BatchConfigItemReq;
+import com.baidu.brcc.domain.vo.ConfigItemForGroupVo;
 import com.baidu.brcc.domain.vo.GrayAddReq;
 import com.baidu.brcc.domain.vo.GrayRuleReq;
 import com.baidu.brcc.domain.vo.GrayRuleVo;
 import com.baidu.brcc.domain.vo.GrayVersionRuleVo;
+import com.baidu.brcc.domain.vo.ItemReq;
+import com.baidu.brcc.dto.RefProjectDto;
 import com.baidu.brcc.service.BrccInstanceService;
+import com.baidu.brcc.service.ConfigGroupService;
 import com.baidu.brcc.service.GrayInfoService;
 import com.baidu.brcc.service.GrayRuleService;
+import com.baidu.brcc.service.ProjectService;
+import com.baidu.brcc.utils.DataTransUtils;
+import com.baidu.brcc.utils.FileFormat.FileFormatUtils;
+import com.baidu.brcc.utils.Name.NameUtils;
+import com.baidu.brcc.utils.convert.ConvertFileUtil;
+import com.google.common.base.Splitter;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.util.PropertiesUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -118,14 +158,15 @@ import com.baidu.brcc.service.EnvironmentUserService;
 import com.baidu.brcc.service.ProjectUserService;
 import com.baidu.brcc.service.RccCache;
 import com.baidu.brcc.service.VersionService;
+import org.springframework.web.multipart.MultipartFile;
 
-import javax.xml.crypto.Data;
+import javax.servlet.http.HttpServletResponse;
 
 /**
  * 管理端版本相关接口
  */
 @RestController
-@RequestMapping("version")
+@RequestMapping("console/version")
 public class VersionController {
 
     @Autowired
@@ -156,6 +197,15 @@ public class VersionController {
     @Autowired
     private GrayInfoService grayInfoService;
 
+    @Autowired
+    private BrccInstanceService brccInstanceService;
+
+    @Autowired
+    private ConfigGroupService groupService;
+
+    @Autowired
+    private ProjectService projectService;
+
     /**
      * 新增或修改版本
      *
@@ -173,6 +223,9 @@ public class VersionController {
         }
         Long id = req.getId();
         String name = trim(req.getName());
+        if (NameUtils.containsChinese(name)) {
+            return R.error(CHINESE_NOT_ALLOWED_STATUS, CHINESE_NOT_ALLOWED_MSG);
+        }
         String memo = trim(req.getMemo());
         Long cacheEvictEnvironmentId = null;
 
@@ -212,6 +265,9 @@ public class VersionController {
         }
         Long mainVersionId = req.getId();
         String name = trim(req.getName());
+        if (NameUtils.containsChinese(name)) {
+            return R.error(CHINESE_NOT_ALLOWED_STATUS, CHINESE_NOT_ALLOWED_MSG);
+        }
         String memo = trim(req.getMemo());
         Long grayVersionId = req.getGrayVersionId();
         Long cacheEvictEnvironmentId = null;
@@ -435,6 +491,9 @@ public class VersionController {
                     versionVo.setName(item.getName());
                     versionVo.setMemo(item.getMemo());
                     versionVo.setEnvironmentId(item.getEnvironmentId());
+                    List<Long> depIds = DataTransUtils.string2List(item.getDependencyIds());
+                    versionVo.setDependencyIds(depIds);
+                    versionVo.setDependencyInfos(versionService.getDepInfosByDepIds(depIds));
                     if (item.getMainVersionId() > 0) {
                         versionVo.setGrayFlag(GrayFlag.GRAY.getValue());
                         versionVo.setMainVersionId(item.getMainVersionId());
@@ -574,6 +633,119 @@ public class VersionController {
         }
 
         return R.ok(treeNodes);
+    }
+
+    // 我的公共版本
+    @GetMapping("myCommonVersionTree")
+    public R<List<VersionNodeVo>> myCommonVersionTree(
+            @LoginUser User user,
+            @RequestParam(name = "productId", defaultValue = "0", required = false) Long productId,
+            @RequestParam(name = "projectId", defaultValue = "0", required = false) Long projectId,
+            @RequestParam(name = "versionId") Long versionId
+    ) {
+        List<VersionNodeVo> versionNodeVos = versionService.myCommonVersion(user, productId, projectId, versionId);
+        if (CollectionUtils.isEmpty(versionNodeVos)) {
+            return R.ok(new ArrayList<>(0));
+        }
+        return R.ok(versionNodeVos);
+
+//        Map<Long, String> productNameMap = toMap(versionNodeVos,
+//                VersionNodeVo::getProductId, VersionNodeVo::getProductName);
+//        Map<Long, TreeNode> productTreeNodeMap = new HashMap<>();
+//        if (!CollectionUtils.isEmpty(productNameMap)) {
+//            for (Map.Entry<Long, String> entry : productNameMap.entrySet()) {
+//                TreeNode treeNode = new TreeNode();
+//                treeNode.setId(entry.getKey());
+//                treeNode.setName(entry.getValue());
+//                treeNode.setType(PRODUCT);
+//                treeNodes.add(treeNode);
+//                productTreeNodeMap.put(entry.getKey(), treeNode);
+//            }
+//        }
+//
+//        Map<Long, List<VersionNodeVo>> projectListMap = toMapList(versionNodeVos, VersionNodeVo::getProjectId);
+//        Map<Long, TreeNode> projectTreeNodeMap = new HashMap<>();
+//        if (!CollectionUtils.isEmpty(projectListMap)) {
+//            for (List<VersionNodeVo> ps : projectListMap.values()) {
+//                if (!CollectionUtils.isEmpty(ps)) {
+//                    VersionNodeVo vo = ps.get(0);
+//                    Long id = vo.getProjectId();
+//                    String name = vo.getProjectName();
+//                    Long pid = vo.getProductId();
+//                    TreeNode treeNode = new TreeNode();
+//                    treeNode.setId(id);
+//                    treeNode.setName(name);
+//                    treeNode.setType(PROJECT);
+//                    projectTreeNodeMap.put(id, treeNode);
+//
+//                    TreeNode pnode = productTreeNodeMap.get(pid);
+//                    if (pnode == null) {
+//                        continue;
+//                    }
+//                    if (pnode.getChildren() == null) {
+//                        pnode.setChildren(new ArrayList<>());
+//                        pnode.setHasChildren(true);
+//                    }
+//                    pnode.getChildren().add(treeNode);
+//                }
+//            }
+//        }
+//
+//        Map<Long, List<VersionNodeVo>> envListMap = toMapList(versionNodeVos, VersionNodeVo::getEnvironmentId);
+//        Map<Long, TreeNode> envTreeNodeMap = new HashMap<>();
+//        if (!CollectionUtils.isEmpty(envListMap)) {
+//            for (List<VersionNodeVo> es : envListMap.values()) {
+//                if (!CollectionUtils.isEmpty(es)) {
+//                    VersionNodeVo vo = es.get(0);
+//                    Long id = vo.getEnvironmentId();
+//                    String name = vo.getEnvironmentName();
+//                    Long pid = vo.getProjectId();
+//                    TreeNode treeNode = new TreeNode();
+//                    treeNode.setId(id);
+//                    treeNode.setName(name);
+//                    treeNode.setType(ENVIRONMENT);
+//                    envTreeNodeMap.put(id, treeNode);
+//
+//                    TreeNode pnode = projectTreeNodeMap.get(pid);
+//                    if (pnode == null) {
+//                        continue;
+//                    }
+//                    if (pnode.getChildren() == null) {
+//                        pnode.setChildren(new ArrayList<>());
+//                        pnode.setHasChildren(true);
+//                    }
+//                    pnode.getChildren().add(treeNode);
+//                }
+//            }
+//        }
+//
+//        Map<Long, List<VersionNodeVo>> versionListMap = toMapList(versionNodeVos, VersionNodeVo::getVersionId);
+//        if (!CollectionUtils.isEmpty(versionListMap)) {
+//            for (List<VersionNodeVo> vs : versionListMap.values()) {
+//                if (!CollectionUtils.isEmpty(vs)) {
+//                    VersionNodeVo vo = vs.get(0);
+//                    Long id = vo.getVersionId();
+//                    String name = vo.getVersionName();
+//                    Long pid = vo.getEnvironmentId();
+//                    TreeNode treeNode = new TreeNode();
+//                    treeNode.setId(id);
+//                    treeNode.setName(name);
+//                    treeNode.setType(VERSION);
+//
+//                    TreeNode pnode = envTreeNodeMap.get(pid);
+//                    if (pnode == null) {
+//                        continue;
+//                    }
+//                    if (pnode.getChildren() == null) {
+//                        pnode.setChildren(new ArrayList<>());
+//                        pnode.setHasChildren(true);
+//                    }
+//                    pnode.getChildren().add(treeNode);
+//                }
+//            }
+//        }
+//
+//        return R.ok(treeNodes);
     }
 
     /**
@@ -720,4 +892,215 @@ public class VersionController {
         return R.ok(configItemList);
     }
 
+    /**
+     * 配置回滚
+     *
+     * @param
+     * @param user
+     * @return
+     */
+    @PostMapping("rollBack/{versionId}")
+    public R rollBack(@PathVariable("versionId") Long versionId,
+                      @RequestBody BatchConfigItemReq batchConfigItemReq, @LoginUser User user) {
+        Version version = versionService.selectByPrimaryKey(versionId);
+        if (version == null || Deleted.DELETE.getValue().equals(version.getDeleted())) {
+            return R.error(VERSION_NOT_EXISTS_STATUS, VERSION_NOT_EXISTS_MSG);
+        }
+        if (!environmentUserService.checkAuth(version.getProductId(), version.getProjectId(),
+                version.getEnvironmentId(), user)) {
+            return R.error(PRIV_MIS_STATUS, PRIV_MIS_MSG);
+        }
+        Long groupId = batchConfigItemReq.getGroupId();
+        if (groupId == null || groupId <= 0) {
+            return R.error(GROUP_ID_NOT_EXISTS_STATUS, GROUP_ID_NOT_EXISTS_MSG);
+        }
+        ConfigGroup configGroup = groupService.selectByPrimaryKey(groupId);
+        if (configGroup == null || Deleted.DELETE.getValue().equals(configGroup.getDeleted())) {
+            return R.error(GROUP_NOT_EXISTS_STATUS, GROUP_NOT_EXISTS_MSG);
+        }
+        if (!CollectionUtils.isEmpty(batchConfigItemReq.getItems())) {
+            for (ItemReq req : batchConfigItemReq.getItems()) {
+                String name = req.getName();
+                if (StringUtils.isBlank(name)) {
+                    return R.error(CONFIG_KEY_NOT_EXISTS_STATUS, CONFIG_KEY_NOT_EXISTS_MSG);
+                }
+                ApiItemVo apiItemVo = configItemService.getByVersionIdAndName(configGroup.getProjectId(), configGroup.getVersionId(), name);
+                if (apiItemVo != null && !apiItemVo.getGroupId().equals(groupId)) {
+                    return R.error(CONFIG_ITEM_EXISTS_STATUS, CONFIG_ITEM_EXISTS_MSG);
+                }
+            }
+        }
+        if (!environmentUserService.checkAuth(configGroup.getProductId(), configGroup.getProjectId(),
+                configGroup.getEnvironmentId(), user)) {
+            return R.error(PRIV_MIS_STATUS, PRIV_MIS_MSG);
+        }
+        int cnt = configItemService.batchSave(user, batchConfigItemReq, configGroup);
+
+        // 失效版本下的配置
+        if (configGroup.getVersionId() != null && configGroup.getVersionId() > 0) {
+            List<Long> versionIds = new ArrayList<>();
+            versionIds.add(configGroup.getVersionId());
+            if (projectService.selectByPrimaryKey(configGroup.getProjectId()).getProjectType().equals(ProjectType.PUBLIC.getValue())) {
+                versionIds.addAll(versionService.getChildrenVersionById(versionId));
+            }
+            rccCache.evictConfigItem(versionIds);
+        }
+        return R.ok(cnt);
+    }
+
+    /**
+     * configuration export
+     *
+     * @param
+     * @param user
+     * @param versionId
+     * @return
+     */
+    @SaveLog(scene = "0022",
+            paramsIdxes = {0},
+            params = {"groupId"})
+    @PostMapping("export/{versionId}")
+    public void export(@PathVariable("versionId") Long versionId, @LoginUser User user, HttpServletResponse res) throws IOException {
+        // check version
+        Version version = versionService.selectByPrimaryKey(versionId);
+        if (version == null || Deleted.DELETE.getValue().equals(version.getDeleted())) {
+            throw new BizException(VERSION_NOT_EXISTS_STATUS, VERSION_NOT_EXISTS_MSG);
+        }
+        // authentication
+        if (!environmentUserService.checkAuth(version.getProductId(), version.getProjectId(),
+                version.getEnvironmentId(), user)) {
+            throw new BizException(PRIV_MIS_STATUS, PRIV_MIS_MSG);
+        }
+        // list all groups by versionId
+        List<ConfigGroup> configGroupList = groupService.listAllGroupByVersionId(version.getProjectId(), versionId);
+        // check group list
+        if (configGroupList.isEmpty()) {
+            throw new BizException(GROUP_NOT_EXISTS_STATUS, GROUP_NOT_EXISTS_MSG);
+        }
+        // define file
+        String fileName = version.getName() + ".properties";
+        String fileContent = "";
+        for (ConfigGroup configGroup : configGroupList) {
+            // find all configurations
+            List<ConfigItemForGroupVo> items =
+                    configItemService.selectByExample(ConfigItemExample.newBuilder()
+                                    .build()
+                                    .createCriteria()
+                                    .andDeletedEqualTo(Deleted.OK.getValue())
+                                    .andGroupIdEqualTo(configGroup.getId())
+                                    .toExample(),
+                            item -> {
+                                ConfigItemForGroupVo vo = new ConfigItemForGroupVo();
+                                vo.setName(item.getName());
+                                vo.setVal(item.getVal());
+                                return vo;
+                            },
+                            MetaConfigItem.COLUMN_NAME_ID,
+                            MetaConfigItem.COLUMN_NAME_NAME,
+                            MetaConfigItem.COLUMN_NAME_MEMO,
+                            MetaConfigItem.COLUMN_NAME_VAL
+                    );
+            res.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment;filename=" + fileName);
+            // get fileContent
+            String tem = ConvertFileUtil.convert2FileContent(items, configGroup.getName());
+            fileContent = tem + fileContent;
+        }
+        try {
+            // write content
+            res.getOutputStream().write(fileContent.getBytes());
+        } catch (Exception e) {
+            throw new IOException("export configurations failed:{}", e);
+        }
+    }
+
+    /**
+     * configuration import
+     *
+     * @param
+     * @param user
+     * @return
+     */
+    @SaveLog(scene = "0023",
+            paramsIdxes = {0},
+            params = {"groupId"})
+    @PostMapping("import/{versionId}")
+    public R importFile(@PathVariable("versionId") Long versionId,
+                        @RequestParam Byte type,
+                        @RequestParam("file") MultipartFile file,
+                        @LoginUser User user) throws IOException {
+        // check version
+        Version version = versionService.selectByPrimaryKey(versionId);
+        if (version == null || Deleted.DELETE.getValue().equals(version.getDeleted())) {
+            throw new BizException(VERSION_NOT_EXISTS_STATUS, VERSION_NOT_EXISTS_MSG);
+        }
+        // authentication
+        if (!environmentUserService.checkAuth(version.getProductId(), version.getProjectId(),
+                version.getEnvironmentId(), user)) {
+            throw new BizException(PRIV_MIS_STATUS, PRIV_MIS_MSG);
+        }
+        // check file
+        FileFormatUtils.checkFile(file);
+        ConfigGroup configGroup = new ConfigGroup();
+        configGroup.setVersionId(versionId);
+        configGroup.setEnvironmentId(version.getEnvironmentId());
+        configGroup.setProductId(version.getProductId());
+        configGroup.setProjectId(version.getProjectId());
+        // read file
+        configItemService.parseProFile(file, configGroup, type);
+        return R.ok();
+    }
+
+    @PostMapping("ref")
+    public R addRef(@RequestBody RefProjectDto refProjectDto, @LoginUser User user) {
+        if (user == null) {
+            return R.error(NON_LOGIN_STATUS, NON_LOGIN_MSG);
+        }
+        if (null == refProjectDto.getVersionId() || refProjectDto.getVersionId() <= 0) {
+            return R.error(VERSION_ID_NOT_EXISTS_STATUS, VERSION_ID_NOT_EXISTS_MSG);
+        }
+        if (null == refProjectDto.getRefIds()) {
+            return R.error(PARAM_ERROR_STATUS, PARAM_ERROR_MSG);
+        }
+        List<Long> refIdList = refProjectDto.getRefIds();
+        Long versionId = refProjectDto.getVersionId();
+        Version exists = versionService.selectByPrimaryKey(versionId);
+        if (exists == null || Deleted.DELETE.getValue().equals(exists.getDeleted())) {
+            return R.error(VERSION_NOT_EXISTS_STATUS, VERSION_NOT_EXISTS_MSG);
+        }
+        if (!versionService.checkAuths(user, versionId, refProjectDto.getRefIds())) {
+            return R.error(PRIV_MIS_STATUS, PRIV_MIS_MSG);
+        }
+        int cnt = 0;
+        if (refIdList.isEmpty()) {
+            cnt = versionService.updateByPrimaryKeySelective(Version.newBuilder()
+                    .updateTime(new Date())
+                    .dependencyIds("")
+                    .id(versionId)
+                    .build());
+        } else {
+            //剔除掉当前版本自己id
+            refIdList.remove(versionId);
+            // 根据refIdList获取版本信息
+            List<Version> versions = versionService.selectByPrimaryKeys(refIdList);
+            String refIds = "";
+            for (Version version : versions) {
+                refIds += version.getId() + ",";
+            }
+            // 去除最后的逗号
+            refIds = refIds.substring(0, refIds.length() - 1);
+            cnt = versionService.updateByPrimaryKeySelective(Version.newBuilder()
+                    .updateTime(new Date())
+                    .dependencyIds(refIds)
+                    .id(versionId)
+                    .build());
+        }
+        // 失效版本下的配置
+        List<Long> versionIds = new ArrayList<>();
+        versionIds.add(versionId);
+        if (projectService.selectByPrimaryKey(exists.getProjectId()).getProjectType().equals(ProjectType.PUBLIC.getValue())) {
+            versionIds.addAll(versionService.getChildrenVersionById(versionId));
+        }
+        rccCache.evictConfigItem(versionIds);
+        return R.ok(cnt);
+    }
 }

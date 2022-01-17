@@ -18,6 +18,8 @@
  */
 package com.baidu.brcc.controller;
 
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_ID_NOT_EXISTS_MSG;
@@ -26,10 +28,16 @@ import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_NAME_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_NAME_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_NOT_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.ID_NULL_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.ID_NULL_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.NAME_NULL_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.NAME_NULL_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.TYPE_NULL_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.TYPE_NULL_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.VERSION_ID_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.VERSION_ID_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.VERSION_NOT_EXISTS_MSG;
@@ -37,11 +45,17 @@ import static com.baidu.brcc.common.ErrorStatusMsg.VERSION_NOT_EXISTS_STATUS;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.apache.commons.lang3.StringUtils.trim;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.baidu.brcc.domain.Project;
+import com.baidu.brcc.domain.vo.FindTreeInfoReq;
+import com.baidu.brcc.domain.vo.FindTreeInfoVo;
+import com.baidu.brcc.service.ProjectService;
+import com.baidu.brcc.utils.Name.NameUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -74,7 +88,7 @@ import com.baidu.brcc.utils.time.DateTimeUtils;
  * 管理端分组相关接口
  */
 @RestController
-@RequestMapping("group")
+@RequestMapping("console/group")
 public class GroupController {
 
     @Autowired
@@ -86,12 +100,14 @@ public class GroupController {
     @Autowired
     VersionService versionService;
 
+    @Autowired
+    ProjectService projectService;
+
     /**
      * 新增或修改分组
      *
      * @param req  req.id > 0 表示修改，否则新增
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0005",
@@ -104,6 +120,9 @@ public class GroupController {
         }
         Long id = req.getId();
         String name = trim(req.getName());
+        if (NameUtils.containsChinese(name)) {
+            return R.error(CHINESE_NOT_ALLOWED_STATUS, CHINESE_NOT_ALLOWED_MSG);
+        }
         Date now = DateTimeUtils.now();
         if (id != null && id > 0) {
             // 修改
@@ -186,7 +205,6 @@ public class GroupController {
      *
      * @param groupId
      * @param user
-     *
      * @return
      */
     @SaveLog(scene = "0006",
@@ -222,7 +240,6 @@ public class GroupController {
      * @param pageNo
      * @param pageSize
      * @param user
-     *
      * @return
      */
     @GetMapping("list")
@@ -272,9 +289,23 @@ public class GroupController {
         return R.ok(pagination, ext);
     }
 
-    @GetMapping(value = "/findTreeInfo")
+    @GetMapping(value = "/treeDetail")
     public R<List<TreeNode>> findTreeInfo(@LoginUser User user) {
         return R.ok(groupService.findTreeInfo(user));
     }
 
+    @PostMapping(value = "/findTreeInfo")
+    public R<List<FindTreeInfoVo>> findTreeInfo(@RequestBody FindTreeInfoReq req, @LoginUser User user) {
+        if (user == null) {
+            return R.error(NON_LOGIN_STATUS, NON_LOGIN_MSG);
+        }
+        if (null == req.getType() || req.getType() < 0) {
+            return R.error(TYPE_NULL_STATUS, TYPE_NULL_MSG);
+        }
+        if (null == req.getId() || req.getId() < 0) {
+            return R.error(ID_NULL_STATUS, ID_NULL_MSG);
+        }
+        List<FindTreeInfoVo> res = groupService.loadTreeInfo(req.getId(), req.getType());
+        return R.ok(res);
+    }
 }

@@ -42,6 +42,7 @@ import static org.apache.commons.lang3.StringUtils.isBlank;
 import static org.apache.commons.lang3.StringUtils.trim;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -50,6 +51,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.baidu.brcc.annotation.SaveLog;
+import com.baidu.brcc.common.InstanceEventType;
 import com.baidu.brcc.domain.ConfigGroup;
 import com.baidu.brcc.domain.ConfigGroupExample;
 import com.baidu.brcc.domain.Environment;
@@ -65,6 +67,7 @@ import com.baidu.brcc.domain.meta.MetaVersion;
 import com.baidu.brcc.domain.vo.ApiGroupVo;
 import com.baidu.brcc.domain.vo.ConfigGroupReq;
 import com.baidu.brcc.domain.vo.VersionReq;
+import com.baidu.brcc.dto.InstanceInfoEventDto;
 import com.baidu.brcc.rule.GrayExcutor;
 import com.baidu.brcc.service.BrccInstanceService;
 import com.baidu.brcc.service.ConfigGroupService;
@@ -194,10 +197,10 @@ public class ApiVersionController {
         versionVo.setEnvironmentId(version.getEnvironmentId());
         versionVo.setProjectId(version.getProjectId());
         versionVo.setVersionId(version.getId());
+        Long mainVersionId = version.getId();
         // 判断是否灰度
         if (enableGray != null && enableGray && version.getGrayFlag().equals(GrayFlag.GRAY.getValue())) {
             // 获取灰度版本
-            Long mainVersionId = version.getId();
             Version grayVersion = versionService.selectByMainVersionId(mainVersionId);
             Long grayVersionId = grayVersion.getId();
             // 获取灰度规则
@@ -217,10 +220,14 @@ public class ApiVersionController {
                     versionVo.setProjectId(grayVersion.getProjectId());
                     versionVo.setVersionId(grayVersion.getId());
                     // 命中后修改实例的灰度信息
-                    brccInstanceService.updateInstance(ip, idc, containerId, grayVersionId);
+                    brccInstanceService.updateInstance(ip, idc, containerId, mainVersionId, grayVersionId);
+                }else{
+                    // 把versionId改为主版本的ID
+                    brccInstanceService.updateInvalidGrayInstance(ip, idc, containerId, mainVersionId, grayVersionId);
                 }
             }
         }
+        brccInstanceService.updateInstance(ip, idc, containerId, mainVersionId, 0L);
         return R.ok(versionVo);
     }
 
@@ -415,5 +422,46 @@ public class ApiVersionController {
         versionService.insertSelective(insert);
         rccCache.evictVersion(versionReq.getEnvironmentId());
         return R.ok(insert.getId());
+    }
+
+    /**
+     * push configuration changes, change checkSum
+     *
+     * @param versionId
+     * @param token
+     * @return
+     */
+    @SaveLog(scene = "0020",
+            paramsIdxes = {0},
+            params = {"versionId"})
+    @PostMapping("version/pushChange")
+    public R pushChange(String token, Long versionId) {
+        // check token
+        if (isBlank(token)) {
+            return R.error(PROJECT_API_TOKEN_NOT_EMPTY_STATUS, PROJECT_API_TOKEN_NOT_EMPTY_MSG);
+        }
+        // check apiToken valid
+        ApiToken apiToken = apiTokenCacheService.getApiToken(token);
+        if (apiToken == null) {
+            return R.error(PROJECT_API_TOKEN_NOT_EXISTS_STATUS, PROJECT_API_TOKEN_NOT_EXISTS_MSG);
+        }
+        if (versionId == null || versionId <= 0) {
+            return R.error(VERSION_ID_NOT_EXISTS_STATUS, VERSION_ID_NOT_EXISTS_MSG);
+        }
+        // check version
+        Version version = versionService.selectByPrimaryKey(versionId);
+        if (version == null || Deleted.DELETE.getValue().equals(version.getDeleted())) {
+            return R.error(VERSION_NOT_EXISTS_STATUS, VERSION_NOT_EXISTS_MSG);
+        }
+        Version update = new Version();
+        update.setId(versionId);
+        update.setCheckSum(UUID.randomUUID().toString());
+        update.setCheckSumDate(new Date());
+        update.setUpdateTime(new Date());
+        int cnt = versionService.updateByPrimaryKeySelective(update);
+        rccCache.evictVersion(version.getEnvironmentId());
+        // 失效id->version的缓存
+        rccCache.evictVersionById(Arrays.asList(versionId));
+        return R.ok(cnt);
     }
 }

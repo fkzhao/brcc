@@ -112,6 +112,10 @@ public class ErrorStatusMsg {
     public static final Integer PROJECT_EXISTS_STATUS = 100113;
     public static final String PROJECT_EXISTS_MSG = "工程已存在";
 
+    // 工程名已存在
+    public static final Integer PROJECT_NAME_EXISTS_STATUS = 100232;
+    public static final String PROJECT_NAME_EXISTS_MSG = "工程名已被占用！工程名在BRCC全局唯一";
+
     // 工程类型无效
     public static final Integer PROJECT_TYPE_NOT_AVAILABLE_STATUS = 100114;
     public static final String PROJECT_TYPE_NOT_AVAILABLE_MSG = "工程类型无效";
@@ -290,4 +294,49 @@ public class ErrorStatusMsg {
     // 配置项不存在
     public static final Integer CONFIG_ITEM_NOT_EXISTS_STATUS = 100215;
     public static final String CONFIG_ITEM_NOT_EXISTS_MSG = "配置项不存在";
+
+    // 复制版本时分组已存在
+    public static final Integer COPY_GROUP_EXISTS_STATUS = 100224;
+    public static final String COPY_GROUP_EXISTS_MSG = "该版本下存在相同分组，无法复制，请检查";
+
+    // 复制版本时配置已存在
+    public static final Integer COPY_CONFIG_EXISTS_STATUS = 100225;
+    public static final String COPY_CONFIG_EXISTS_MSG = "该版本下存在相同配置，无法复制，请检查";
+
+    // convert properties to string fail
+    public static final Integer CONVERT_TO_STRING_STATUS = 100226;
+    public static final String CONVERT_TO_STRING_MSG = "配置转换失败";
+
+    // file empty error
+    public static final Integer FILE_IS_EMPTY_STATUS = 100227;
+    public static final String FILE_IS_EMPTY_MSG = "文件为空";
+
+    // file name invalid
+    public static final Integer FILE_NAME_INVALID_STATUS = 100228;
+    public static final String FILE_NAME_INVALID_MSG = "文件名字不符合规范";
+
+    // type can not be null
+    public static final Integer TYPE_NULL_STATUS = 100229;
+    public static final String TYPE_NULL_MSG = "类型不能为空";
+
+    // ID can not be null
+    public static final Integer ID_NULL_STATUS = 100230;
+    public static final String ID_NULL_MSG = "ID不能为空";
+
+    // name can not be null
+    public static final Integer NAME_NULL_STATUS = 100231;
+    public static final String NAME_NULL_MSG = "名称不能为空";
+
+    // name can not be Chinese
+    public static final Integer CHINESE_NOT_ALLOWED_STATUS = 100233;
+    public static final String CHINESE_NOT_ALLOWED_MSG = "名称不能包含中文";
+
+    public static final Integer COUNT_CAN_NOT_NEGATIVE_STATUS = 100234;
+    public static final String COUNT_CAN_NOT_NEGATIVE_MSG = "数量不能为负";
+
+    public static final Integer NO_ENVIRONMENT_PRI_STATUS = 100235;
+    public static final String NO_ENVIRONMENT_PRI_MSG = "无任何环境权限";
+
+    public static final Integer CHILDREN_VERSION_NOT_EMPTY_STATUS = 11000;
+    public static final String CHILDREN_VERSION_NOT_EMPTY_MSG = "该版本仍被其他版本引用，不可删除！";
 }

@@ -14,7 +14,7 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<groupId>com.baidu.mapp</groupId>
-	<version>1.1.0</version>
+	<version>1.5.6-SNAPSHOT</version>
 	<artifactId>brcc-sdk-starter</artifactId>
 
 	<properties>
@@ -67,7 +67,18 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<version>2.4.0</version>
 			<scope>test</scope>
+			<exclusions>
+				<exclusion>
+					<artifactId>log4j-api</artifactId>
+					<groupId>org.apache.logging.log4j</groupId>
+				</exclusion>
+			</exclusions>
 			<optional>true</optional>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.logging.log4j</groupId>
+			<artifactId>log4j-api</artifactId>
+			<version>2.16.0</version>
 		</dependency>
 
 	</dependencies>

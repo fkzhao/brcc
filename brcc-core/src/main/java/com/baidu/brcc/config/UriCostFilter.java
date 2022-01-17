@@ -29,6 +29,7 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.baidu.brcc.utils.LogFilter;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,13 +93,17 @@ public class UriCostFilter implements Filter {
                 long end = System.currentTimeMillis();
                 // doFilter后写header将无效
                 // httpServletResponse.setHeader(HEADER_RCC_SERVER_OUT_TS, end + "");
-                LOGGER.debug(
-                        "request_uri\t[{}]\tnet_cost[{}]\tserver_cost[{}]\tremote_addr[{}]",
-                        uri,
-                        rccTs > 0 ? start - rccTs : -1,
-                        end - start,
-                        request.getRemoteAddr()
-                );
+                if(!uri.endsWith(".js") && !uri.endsWith(".css") && !uri.startsWith("/img/")
+                        && !uri.startsWith("/index/") && !uri.endsWith(".png")) {
+                    uri = LogFilter.getUrl(request);
+                    LOGGER.debug(
+                            "request_uri\t[{}]\tnet_cost[{}]\tserver_cost[{}]\tremote_addr[{}]",
+                            uri,
+                            rccTs > 0 ? start - rccTs : -1,
+                            end - start,
+                            request.getRemoteAddr()
+                    );
+                }
             }
         } else {
             chain.doFilter(request, response);
@@ -106,7 +111,7 @@ public class UriCostFilter implements Filter {
     }
 
     private void collectionHeaderInfo(String uri, HttpServletRequest httpServletRequest) {
-        if (StringUtils.startsWith(uri, "/v2/api/version/") || StringUtils.equals(uri, "/api/item")) {
+        if (StringUtils.startsWith(uri, "/api/v2/version/") || StringUtils.equals(uri, "/api/item")) {
             InstanceInfoEventDto event = new InstanceInfoEventDto();
             // 心跳接口 || 拉取配置接口
             String versionId = httpServletRequest.getHeader(HEADER_VERSION_ID);
@@ -129,7 +134,7 @@ public class UriCostFilter implements Filter {
             event.setNetCost(netCost);
             String versionName = "";
             String envId = "";
-            if (StringUtils.startsWith(uri, "/v2/api/version/")) {
+            if (StringUtils.startsWith(uri, "/api/v2/version/")) {
                 if (StringUtils.isBlank(versionId)) {
                     versionName = uri.substring(13);
                     event.setVersionName(versionName);

@@ -18,12 +18,22 @@
  */
 package com.baidu.brcc.service.impl;
 
+import static com.baidu.brcc.common.ErrorStatusMsg.CONFIG_ITEM_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONFIG_ITEM_EXISTS_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONVERT_TO_STRING_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CONVERT_TO_STRING_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_STATUS;
 import static com.baidu.brcc.utils.collections.CollectionUtils.isEmpty;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
 import static org.apache.commons.lang3.StringUtils.trim;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -31,9 +41,23 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import com.baidu.brcc.domain.ConfigGroupExample;
+import com.baidu.brcc.domain.em.FileImportType;
+import com.baidu.brcc.utils.DataTransUtils;
+import com.baidu.brcc.utils.NameTreadFactory;
+import com.google.common.base.Splitter;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -86,10 +110,15 @@ import com.baidu.brcc.service.VersionService;
 import com.baidu.brcc.service.base.GenericServiceImpl;
 import com.baidu.brcc.utils.collections.CollectionUtils;
 import com.baidu.brcc.utils.time.DateTimeUtils;
+import org.springframework.web.multipart.MultipartFile;
+
+import javax.annotation.PreDestroy;
 
 @Service("configItemService")
 public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, ConfigItemExample>
         implements ConfigItemService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ConfigItemServiceImpl.class);
 
     @Autowired
     private ConfigItemMapper configItemMapper;
@@ -123,6 +152,9 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
 
     @Autowired
     private RccCache rccCache;
+
+    private static ThreadPoolExecutor executor = new ThreadPoolExecutor(Runtime.getRuntime().availableProcessors(), Runtime.getRuntime().availableProcessors() * 2
+            , 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), new NameTreadFactory(), new ThreadPoolExecutor.DiscardPolicy());
 
     @Override
     public BaseMapper<ConfigItem, Long, ConfigItemExample> getMapper() {
@@ -165,6 +197,20 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
     }
 
     @Override
+    public Map<String, ConfigItem> selectMapByProjectIdAndVersionId(Long projectId, Long versionId) {
+        return selectMapByExample(ConfigItemExample.newBuilder()
+                        .build()
+                        .createCriteria()
+                        .andDeletedEqualTo(Deleted.OK.getValue())
+                        .andProjectIdEqualTo(projectId)
+                        .andVersionIdEqualTo(versionId)
+                        .toExample(),
+                ConfigItem::getName,
+                Function.identity()
+        );
+    }
+
+    @Override
     public List<ConfigItem> selectByProjectIdAndVersionIdAndNames(Long projectId, Long versionId, List<String> names) {
         return selectByExample(ConfigItemExample.newBuilder()
                 .build()
@@ -180,60 +226,74 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
     @Override
     @Transactional
     public Integer batchSave(User user, BatchConfigItemReq itemReq, ConfigGroup configGroup) {
-        int result = 0;
+        final AtomicInteger result = new AtomicInteger(0);
         Long groupId = itemReq.getGroupId();
         Map<String, ConfigItem> itemMap =
                 selectMapByExample(ConfigItemExample.newBuilder()
                                 .build()
                                 .createCriteria()
-                                .andGroupIdEqualTo(groupId)
+                                .andVersionIdEqualTo(configGroup.getVersionId())
                                 .andDeletedEqualTo(Deleted.OK.getValue())
                                 .toExample(),
-                        ConfigItem :: getName,
+                        ConfigItem::getName,
                         Function.identity(),
                         MetaConfigItem.COLUMN_NAME_ID,
                         MetaConfigItem.COLUMN_NAME_NAME,
-                        MetaConfigItem.COLUMN_NAME_VAL
+                        MetaConfigItem.COLUMN_NAME_VAL,
+                        MetaConfigItem.COLUMN_NAME_GROUPID
                 );
 
         List<ItemReq> items = itemReq.getItems();
-        Map<String, ItemReq> itemReqMap = CollectionUtils.toMap(items, ItemReq :: getName);
-
+        Map<String, ItemReq> itemReqMap = CollectionUtils.toMap(items, ItemReq::getName);
         Date now = DateTimeUtils.now();
         if (!CollectionUtils.isEmpty(items)) {
             boolean itemMapEmpty = CollectionUtils.isEmpty(itemMap);
-            for (ItemReq req : items) {
+            items.forEach(req -> {
+                // 如果不同分组已存在相同配置,返回错误
                 String name = trim(req.getName());
-                if (itemMapEmpty || itemMap.get(name) == null) {
-                    // 新增的
-                    ConfigItem configItemInsert = ConfigItem.newBuilder()
-                            .createTime(now)
-                            .deleted(Deleted.OK.getValue())
-                            .memo(trim(req.getMemo()))
-                            .environmentId(configGroup.getEnvironmentId())
-                            .name(name)
-                            .groupId(groupId)
-                            .projectId(configGroup.getProjectId())
-                            .productId(configGroup.getProductId())
-                            .updateTime(now)
-                            .val(trim(req.getVal()))
-                            .versionId(configGroup.getVersionId())
-                            .build();
-                    insertSelective(configItemInsert);
-                    result++;
-                } else {
-                    // 需要更新的
-                    ConfigItem configItem = itemMap.get(name);
-                    ConfigItem configItemUpdate = ConfigItem.newBuilder()
-                            .id(configItem.getId())
-                            .memo(trim(req.getMemo()))
-                            .updateTime(now)
-                            .val(trim(req.getVal()))
-                            .build();
-                    updateByPrimaryKeySelective(configItemUpdate);
-                    result++;
+                if (!itemMapEmpty && itemMap.get(name) != null) {
+                    if (!itemMap.get(name).getGroupId().equals(groupId)) {
+                        throw new BizException(CONFIG_ITEM_EXISTS_MSG, CONFIG_ITEM_EXISTS_STATUS);
+                    }
                 }
-            }
+                executor.execute(() -> {
+                            try {
+                                if (itemMapEmpty || itemMap.get(name) == null) {
+                                    // 新增的
+                                    ConfigItem configItemInsert = ConfigItem.newBuilder()
+                                            .createTime(now)
+                                            .deleted(Deleted.OK.getValue())
+                                            .memo(trim(req.getMemo()))
+                                            .environmentId(configGroup.getEnvironmentId())
+                                            .name(name)
+                                            .groupId(groupId)
+                                            .projectId(configGroup.getProjectId())
+                                            .productId(configGroup.getProductId())
+                                            .updateTime(now)
+                                            .val(trim(req.getVal()))
+                                            .versionId(configGroup.getVersionId())
+                                            .build();
+                                    insertSelective(configItemInsert);
+                                    result.incrementAndGet();
+
+                                } else {
+                                    // 需要更新的
+                                    ConfigItem configItem = itemMap.get(name);
+                                    ConfigItem configItemUpdate = ConfigItem.newBuilder()
+                                            .id(configItem.getId())
+                                            .memo(trim(req.getMemo()))
+                                            .updateTime(now)
+                                            .val(trim(req.getVal()))
+                                            .build();
+                                    updateByPrimaryKeySelective(configItemUpdate);
+                                    result.incrementAndGet();
+                                }
+                            } catch (Throwable e) {
+                                LOGGER.error("batchSave error.", e);
+                            }
+                        }
+                );
+            });
         }
         if (!CollectionUtils.isEmpty(itemMap)) {
             boolean isItemsMapEmpty = CollectionUtils.isEmpty(itemReqMap);
@@ -241,14 +301,16 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
                 Long id = item.getId();
                 String name = trim(item.getName());
                 if (isItemsMapEmpty || itemReqMap.get(name) == null) {
-                    // 需要删除的
-                    ConfigItem configItemUpdate = ConfigItem.newBuilder()
-                            .id(id)
-                            .updateTime(now)
-                            .deleted(Deleted.DELETE.getValue())
-                            .build();
-                    updateByPrimaryKeySelective(configItemUpdate);
-                    result++;
+                    // 若现存和新增的分组ID相同，需要删除
+                    if (item.getGroupId().equals(groupId)) {
+                        ConfigItem configItemUpdate = ConfigItem.newBuilder()
+                                .id(id)
+                                .updateTime(now)
+                                .deleted(Deleted.DELETE.getValue())
+                                .build();
+                        updateByPrimaryKeySelective(configItemUpdate);
+                        result.incrementAndGet();
+                    }
                 }
             }
         }
@@ -268,7 +330,15 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
         }
         configChangeLogService.saveLogWithBackground(user.getId(), user.getName(), groupId, oldConfigMap, newConfigMap,
                 new Date());
-        return result;
+        return result.get();
+    }
+
+    @PreDestroy
+    public void stop() {
+        LOGGER.info("destory configItemService executor thread pool.");
+        if (executor != null) {
+            executor.shutdown();
+        }
     }
 
     @Override
@@ -339,8 +409,8 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
                         .andDeletedEqualTo(Deleted.OK.getValue())
                         .andGroupIdEqualTo(groupId)
                         .toExample(),
-                ConfigItem :: getName,
-                ConfigItem :: getVal,
+                ConfigItem::getName,
+                ConfigItem::getVal,
                 MetaConfigItem.COLUMN_NAME_NAME,
                 MetaConfigItem.COLUMN_NAME_VAL
         );
@@ -382,8 +452,8 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
                         .andDeletedEqualTo(Deleted.OK.getValue())
                         .andVersionIdEqualTo(versionId)
                         .toExample(),
-                ConfigItem :: getName,
-                ConfigItem :: getVal,
+                ConfigItem::getName,
+                ConfigItem::getVal,
                 MetaConfigItem.COLUMN_NAME_NAME,
                 MetaConfigItem.COLUMN_NAME_VAL
         );
@@ -439,6 +509,43 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
             }
         }
         return itemsVos;
+    }
+
+    @Override
+    public Map<String, ConfigItem> getCommonAndPrivateByVersionIdInCache(Long projectId, Long versionId, Set<Long> resolved) {
+        Map<String, ConfigItem> allConfig = rccCache.getItemMap(versionId);
+        if (CollectionUtils.isEmpty(allConfig)) {
+            // get the original configuration
+            Map<String, ConfigItem> items = selectMapByProjectIdAndVersionId(projectId, versionId);
+            // get the common configuration
+            Version version = versionService.selectByPrimaryKey(versionId);
+            resolved.add(versionId);
+            if (version.getDependencyIds().isEmpty()) {
+                rccCache.loadItemMap(versionId, allConfig, true);
+                return items;
+            }
+            List<Long> depIds = DataTransUtils.string2List(version.getDependencyIds());
+            for (Long depId : depIds) {
+                Version item = versionService.selectByPrimaryKey(depId);
+                if (null != item) {
+                    Map<String, ConfigItem> depItem = new HashMap<>();
+                    if (resolved.contains(depId)) {
+                        continue;
+                    }
+                    // 递归调用，结束点：没有子版本或者该版本已被加载
+                    depItem = getCommonAndPrivateByVersionIdInCache(item.getProjectId(), item.getId(), resolved);
+                    if (!CollectionUtils.isEmpty(depItem)) {
+                        allConfig.putAll(depItem);
+                    }
+                    resolved.add(depId);
+                }
+            }
+            if (!CollectionUtils.isEmpty(items)) {
+                allConfig.putAll(items);
+                rccCache.loadItemMap(versionId, allConfig, true);
+            }
+        }
+        return allConfig;
     }
 
     @Override
@@ -571,35 +678,35 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
         if (pagination != null && !CollectionUtils.isEmpty(pagination.getDataList())) {
             Map<Long, Product> productMap = productService.selectMapByPrimaryKeys(
                     productIds,
-                    Product :: getId,
+                    Product::getId,
                     MetaProduct.COLUMN_NAME_ID,
                     MetaProduct.COLUMN_NAME_NAME
             );
 
             Map<Long, Project> projectMap = projectService.selectMapByPrimaryKeys(
                     projectIds,
-                    Project :: getId,
+                    Project::getId,
                     MetaProject.COLUMN_NAME_ID,
                     MetaProject.COLUMN_NAME_NAME
             );
 
             Map<Long, Environment> environmentMap = environmentService.selectMapByPrimaryKeys(
                     environmentIds,
-                    Environment :: getId,
+                    Environment::getId,
                     MetaEnvironment.COLUMN_NAME_ID,
                     MetaEnvironment.COLUMN_NAME_NAME
             );
 
             Map<Long, Version> versionMap = versionService.selectMapByPrimaryKeys(
                     versionIds,
-                    Version :: getId,
+                    Version::getId,
                     MetaVersion.COLUMN_NAME_ID,
                     MetaVersion.COLUMN_NAME_NAME
             );
 
             Map<Long, ConfigGroup> groupMap = configGroupService.selectMapByPrimaryKeys(
                     groupIds,
-                    ConfigGroup :: getId,
+                    ConfigGroup::getId,
                     MetaConfigGroup.COLUMN_NAME_ID,
                     MetaConfigGroup.COLUMN_NAME_NAME
             );
@@ -684,5 +791,81 @@ public class ConfigItemServiceImpl extends GenericServiceImpl<ConfigItem, Long, 
             map.put(MetaEnvironmentUser.COLUMN_NAME_ENVIRONMENTID, environmentIds);
         }
         return map;
+    }
+
+    @Override
+    public void parseProFile(MultipartFile file, ConfigGroup configGroup, Byte type) throws IOException {
+        Long groupId = 0L;
+        InputStream in = file.getInputStream();
+        try {
+            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(in));
+            Date now = DateTimeUtils.now();
+            String fileContent = bufferedReader.lines().collect(Collectors.joining(System.lineSeparator()));
+            List<String> conList = Splitter.on("\n").splitToList(fileContent);
+            String memo = "";
+            for (String content : conList) {
+                if (content.trim().equals("")) {
+                    continue;
+                } else if (content.trim().startsWith("#") && content.charAt(1) != '*') {
+                    memo = content.substring(1);
+                } else if (content.trim().startsWith("#*")) {
+                    groupId = configGroupService.updateGroupByImportType(type, configGroup, content.substring(2));
+                } else {
+                    // add a default group
+                    List<String> configItem = Splitter.on("=").splitToList(content);
+                    if (configItem.size() < 2) {
+                        throw new BizException(CONVERT_TO_STRING_STATUS, CONVERT_TO_STRING_MSG);
+                    }
+                    if (groupId == 0L) {
+                        groupId = configGroupService.updateGroupByImportType(type, configGroup, "default");
+                    }
+                    ConfigItem configItemInsert = ConfigItem.newBuilder()
+                            .createTime(now)
+                            .deleted(Deleted.OK.getValue())
+                            .environmentId(configGroup.getEnvironmentId())
+                            .name(configItem.get(0))
+                            .groupId(groupId)
+                            .memo(memo)
+                            .projectId(configGroup.getProjectId())
+                            .productId(configGroup.getProductId())
+                            .updateTime(now)
+                            .val(trim(configItem.get(1)))
+                            .versionId(configGroup.getVersionId())
+                            .build();
+                    // check whether configuration exist
+                    ConfigItem item = selectOneByExample(ConfigItemExample.newBuilder()
+                                    .build()
+                                    .createCriteria()
+                                    .andDeletedEqualTo(Deleted.OK.getValue())
+                                    .andVersionIdEqualTo(configGroup.getVersionId())
+                                    .andNameEqualTo(configItemInsert.getName())
+                                    .toExample(),
+                            MetaConfigGroup.COLUMN_NAME_ID
+                    );
+                    if (item != null) {
+                        if (type.equals(FileImportType.STOP.getValue())) {
+                            configGroupService.deleteByPrimaryKey(groupId);
+                            throw new BizException(CONFIG_ITEM_EXISTS_STATUS, CONFIG_ITEM_EXISTS_MSG);
+                        } else {
+                            // overwrite
+                            item.setVal(configItemInsert.getVal());
+                            item.setMemo(memo);
+                            item.setGroupId(groupId);
+                            updateByPrimaryKeySelective(item);
+                            memo = "";
+                        }
+                    } else {
+                        // add configuration
+                        insertSelective(configItemInsert);
+                        memo = "";
+                    }
+                }
+            }
+            in.close();
+        } catch (IOException e) {
+            throw new IOException("Parse file failed:{}", e);
+        } finally {
+            in.close();
+        }
     }
 }

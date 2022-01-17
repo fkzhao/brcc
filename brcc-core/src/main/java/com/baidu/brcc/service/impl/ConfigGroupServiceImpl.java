@@ -18,6 +18,7 @@
  */
 package com.baidu.brcc.service.impl;
 
+import java.security.acl.Group;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -27,6 +28,10 @@ import java.util.Map;
 import java.util.Set;
 
 import com.baidu.brcc.domain.VersionExample;
+import com.baidu.brcc.domain.em.FileImportType;
+import com.baidu.brcc.domain.em.LoadType;
+import com.baidu.brcc.domain.exception.BizException;
+import com.baidu.brcc.domain.vo.FindTreeInfoVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -77,6 +82,9 @@ import com.baidu.brcc.utils.collections.CollectionUtils;
 import com.baidu.brcc.utils.time.DateTimeUtils;
 
 import lombok.extern.slf4j.Slf4j;
+
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_EXISTS_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.GROUP_EXISTS_STATUS;
 
 @Slf4j
 @Service("configGroupService")
@@ -202,6 +210,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                                 int step,
                                 Map<Long, Product> productManageMap,
                                 Map<Long, Project> projectManageMap,
+                                Map<Long, Project> projectMemberMap,
                                 Map<Long, Environment> envAccessMap,
                                 Map<Long, Version> versionAccessMap,
                                 Map<Long, ConfigGroup> groupAccessMap
@@ -216,7 +225,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                             .build()
                             .createCriteria()
                             .toExample(),
-                    Product :: getId,
+                    Product::getId,
                     MetaProduct.COLUMN_NAME_ID,
                     MetaProduct.COLUMN_NAME_NAME
             );
@@ -231,14 +240,14 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                             .andUserIdEqualTo(user.getId())
                             .andIsAdminEqualTo(ProductUserAdmin.YES.getValue())
                             .toExample(),
-                    ProductUser :: getProductId,
+                    ProductUser::getProductId,
                     MetaProductUser.COLUMN_NAME_PRODUCTID
 
             );
             if (!org.springframework.util.CollectionUtils.isEmpty(productIds)) {
                 Map<Long, Product> tmp = productService.selectMapByPrimaryKeys(
                         productIds,
-                        Product :: getId,
+                        Product::getId,
                         MetaProduct.COLUMN_NAME_ID,
                         MetaProduct.COLUMN_NAME_NAME
                 );
@@ -259,7 +268,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                             .andProductIdIn(productManageMap.keySet())
                             .andDeletedEqualTo(Deleted.OK.getValue())
                             .toExample(),
-                    Project :: getId,
+                    Project::getId,
                     MetaProject.COLUMN_NAME_ID,
                     MetaProject.COLUMN_NAME_NAME,
                     MetaProject.COLUMN_NAME_PRODUCTID
@@ -276,20 +285,46 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                             .andUserIdEqualTo(user.getId())
                             .andIsAdminEqualTo(ProjectUserAdmin.YES.getValue())
                             .toExample(),
-                    ProjectUser :: getProjectId,
+                    ProjectUser::getProjectId,
                     MetaProjectUser.COLUMN_NAME_PROJECTID
 
             );
             if (!org.springframework.util.CollectionUtils.isEmpty(projectIds)) {
                 Map<Long, Project> tmp = projectService.selectMapByPrimaryKeys(
                         projectIds,
-                        Project :: getId,
+                        Project::getId,
                         MetaProject.COLUMN_NAME_ID,
                         MetaProject.COLUMN_NAME_NAME,
                         MetaProject.COLUMN_NAME_PRODUCTID
                 );
                 if (!org.springframework.util.CollectionUtils.isEmpty(tmp)) {
                     projectManageMap.putAll(tmp);
+                }
+            }
+        }
+        {
+            // 工程成员
+            List<Long> projectIds = projectUserService.selectByExample(ProjectUserExample.newBuilder()
+                            .distinct(true)
+                            .build()
+                            .createCriteria()
+                            .andUserIdEqualTo(user.getId())
+                            .andIsAdminEqualTo(ProjectUserAdmin.NO.getValue())
+                            .toExample(),
+                    ProjectUser::getProjectId,
+                    MetaProjectUser.COLUMN_NAME_PROJECTID
+
+            );
+            if (!org.springframework.util.CollectionUtils.isEmpty(projectIds)) {
+                Map<Long, Project> tmp = projectService.selectMapByPrimaryKeys(
+                        projectIds,
+                        Project::getId,
+                        MetaProject.COLUMN_NAME_ID,
+                        MetaProject.COLUMN_NAME_NAME,
+                        MetaProject.COLUMN_NAME_PRODUCTID
+                );
+                if (!org.springframework.util.CollectionUtils.isEmpty(tmp)) {
+                    projectMemberMap.putAll(tmp);
                 }
             }
         }
@@ -305,7 +340,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                             .andProjectIdIn(projectManageMap.keySet())
                             .andDeletedEqualTo(Deleted.OK.getValue())
                             .toExample(),
-                    Environment :: getId,
+                    Environment::getId,
                     MetaEnvironment.COLUMN_NAME_ID,
                     MetaEnvironment.COLUMN_NAME_NAME,
                     MetaEnvironment.COLUMN_NAME_PROJECTID,
@@ -323,14 +358,14 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                             .createCriteria()
                             .andUserIdEqualTo(user.getId())
                             .toExample(),
-                    EnvironmentUser :: getProjectId,
-                    MetaEnvironmentUser.COLUMN_NAME_PROJECTID
+                    EnvironmentUser::getEnvironmentId,
+                    MetaEnvironmentUser.COLUMN_NAME_ENVIRONMENTID
             );
 
             if (!org.springframework.util.CollectionUtils.isEmpty(environmentIds)) {
                 Map<Long, Environment> tmp = environmentService.selectMapByPrimaryKeys(
                         environmentIds,
-                        Environment :: getId,
+                        Environment::getId,
                         MetaEnvironment.COLUMN_NAME_ID,
                         MetaEnvironment.COLUMN_NAME_NAME,
                         MetaEnvironment.COLUMN_NAME_PROJECTID,
@@ -358,7 +393,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                                 .andEnvironmentIdIn(pEnvIds)
                                 .andDeletedEqualTo(Deleted.OK.getValue())
                                 .toExample(),
-                        Version :: getId,
+                        Version::getId,
                         MetaVersion.COLUMN_NAME_ID,
                         MetaVersion.COLUMN_NAME_NAME,
                         MetaVersion.COLUMN_NAME_ENVIRONMENTID,
@@ -387,7 +422,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                                 .andVersionIdIn(pVersionIds)
                                 .andDeletedEqualTo(Deleted.OK.getValue())
                                 .toExample(),
-                        ConfigGroup :: getId,
+                        ConfigGroup::getId,
                         MetaConfigGroup.COLUMN_NAME_ID,
                         MetaConfigGroup.COLUMN_NAME_NAME,
                         MetaConfigGroup.COLUMN_NAME_VERSIONID,
@@ -406,6 +441,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
         long start = System.currentTimeMillis();
         Map<Long, Product> productManageMap = new HashMap<>();
         Map<Long, Project> projectManageMap = new HashMap<>();
+        Map<Long, Project> projectMemberMap = new HashMap<>();
         Map<Long, Environment> envAccessMap = new HashMap<>();
         Map<Long, Version> versionAccessMap = new HashMap<>();
         Map<Long, ConfigGroup> groupAccessMap = new HashMap<>();
@@ -415,6 +451,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                 ConfigGroupService.GROUP,
                 productManageMap,
                 projectManageMap,
+                projectMemberMap,
                 envAccessMap,
                 versionAccessMap,
                 groupAccessMap
@@ -485,6 +522,11 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
                 }
             }
         }
+        for (Long projectId : projectMemberMap.keySet()) {
+            lostProjectIds.add(projectId);
+        }
+
+
 
         if (!org.springframework.util.CollectionUtils.isEmpty(lostProjectIds)) {
             List<Project> projects = projectService.selectByPrimaryKeys(
@@ -506,7 +548,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
         if (!org.springframework.util.CollectionUtils.isEmpty(projectManageMap.values())) {
             for (Project project : projectManageMap.values()) {
                 Long productId = project.getProductId();
-                if (!projectManageMap.containsKey(productId)) {
+                if (!productManageMap.containsKey(productId)) {
                     lostProductIds.add(productId);
                 }
             }
@@ -637,7 +679,7 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
     }
 
     @Override
-    public List<ConfigGroup> listAllGroupByVersionId (Long projectId, Long versionId) {
+    public List<ConfigGroup> listAllGroupByVersionId(Long projectId, Long versionId) {
         return selectByExample(ConfigGroupExample.newBuilder()
                 .build()
                 .createCriteria()
@@ -648,5 +690,104 @@ public class ConfigGroupServiceImpl extends GenericServiceImpl<ConfigGroup, Long
         );
 
 
+    }
+
+    @Override
+    public Long updateGroupByImportType(Byte type, ConfigGroup configGroup, String groupName) {
+        Date now = DateTimeUtils.now();
+        Long groupId = 0L;
+        ConfigGroup item = selectOneByExample(ConfigGroupExample.newBuilder()
+                        .build()
+                        .createCriteria()
+                        .andDeletedEqualTo(Deleted.OK.getValue())
+                        .andVersionIdEqualTo(configGroup.getVersionId())
+                        .andNameEqualTo(groupName)
+                        .toExample(),
+                MetaConfigGroup.COLUMN_NAME_ID
+        );
+        if (item != null) {
+            if (type.equals(FileImportType.STOP.getValue())) {
+                throw new BizException(GROUP_EXISTS_STATUS, GROUP_EXISTS_MSG);
+            } else {
+                groupId = item.getId();
+                return groupId;
+            }
+        } else {
+            ConfigGroup insert = new ConfigGroup();
+            insert.setUpdateTime(now);
+            insert.setCreateTime(now);
+            insert.setDeleted(Deleted.OK.getValue());
+            insert.setName(groupName);
+            insert.setVersionId(configGroup.getVersionId());
+            insert.setEnvironmentId(configGroup.getEnvironmentId());
+            insert.setProjectId(configGroup.getProjectId());
+            insert.setProductId(configGroup.getProductId());
+            insertSelective(insert);
+            groupId = insert.getId();
+        }
+        return groupId;
+    }
+
+    @Override
+    public List<FindTreeInfoVo> loadTreeInfo(Long id, Byte type) {
+        List<FindTreeInfoVo> res = new ArrayList<>();
+        if (type.equals(LoadType.PROJECT.getValue())) {
+            // load project
+            List<Project> projects = projectService.selectByProductId(id);
+            if (projects == null || projects.size() == 0) {
+                return res;
+            }
+            for (Project item : projects) {
+                FindTreeInfoVo findTreeInfoVo = new FindTreeInfoVo();
+                findTreeInfoVo.setId(item.getId());
+                findTreeInfoVo.setName(item.getName());
+                res.add(findTreeInfoVo);
+            }
+        }
+        if (type.equals(LoadType.ENVIRONMENT.getValue())) {
+            // load environment
+            List<Environment> environments = environmentService.selectByProjectId(id);
+            if (environments == null || environments.size() == 0) {
+                return res;
+            }
+            for (Environment item : environments) {
+                FindTreeInfoVo findTreeInfoVo = new FindTreeInfoVo();
+                findTreeInfoVo.setId(item.getId());
+                findTreeInfoVo.setName(item.getName());
+                res.add(findTreeInfoVo);
+            }
+        }
+        if (type.equals(LoadType.VERSION.getValue())) {
+            // load version
+            List<Version> versions = versionService.selectByEnvironmentId(id);
+            if (versions == null || versions.size() == 0) {
+                return res;
+            }
+            for (Version item : versions) {
+                FindTreeInfoVo findTreeInfoVo = new FindTreeInfoVo();
+                findTreeInfoVo.setId(item.getId());
+                findTreeInfoVo.setName(item.getName());
+                res.add(findTreeInfoVo);
+            }
+        }
+        if (type.equals(LoadType.GROUP.getValue())) {
+            // load group
+            List<ConfigGroup> groups = selectByExample(ConfigGroupExample.newBuilder()
+                    .build()
+                    .createCriteria()
+                    .andVersionIdEqualTo(id)
+                    .andDeletedEqualTo(Deleted.OK.getValue())
+                    .toExample());
+            if (groups == null || groups.size() == 0) {
+                return res;
+            }
+            for (ConfigGroup item : groups) {
+                FindTreeInfoVo findTreeInfoVo = new FindTreeInfoVo();
+                findTreeInfoVo.setId(item.getId());
+                findTreeInfoVo.setName(item.getName());
+                res.add(findTreeInfoVo);
+            }
+        }
+        return res;
     }
 }

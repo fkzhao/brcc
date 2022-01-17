@@ -19,6 +19,8 @@
 package com.baidu.brcc.controller;
 
 import static com.baidu.brcc.common.Constants.CAN_WRITE;
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.CHINESE_NOT_ALLOWED_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_NAME_NOT_EMPTY_MSG;
@@ -27,6 +29,8 @@ import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_NOT_EXISTS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.ENVIRONMENT_NOT_EXISTS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.NON_LOGIN_STATUS;
+import static com.baidu.brcc.common.ErrorStatusMsg.NO_ENVIRONMENT_PRI_MSG;
+import static com.baidu.brcc.common.ErrorStatusMsg.NO_ENVIRONMENT_PRI_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_MSG;
 import static com.baidu.brcc.common.ErrorStatusMsg.PRIV_MIS_STATUS;
 import static com.baidu.brcc.common.ErrorStatusMsg.PROJECT_ID_NOT_EXISTS_MSG;
@@ -44,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.baidu.brcc.utils.Name.NameUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,7 +92,7 @@ import com.baidu.brcc.utils.time.DateTimeUtils;
  * 管理端环境相关接口
  */
 @RestController
-@RequestMapping("environment")
+@RequestMapping("console/environment")
 public class EnvironmentController {
 
     private static final Logger log = LoggerFactory.getLogger(EnvironmentController.class);
@@ -125,6 +130,9 @@ public class EnvironmentController {
         }
         Long id = req.getId();
         String name = trim(req.getName());
+        if (NameUtils.containsChinese(name)) {
+            return R.error(CHINESE_NOT_ALLOWED_STATUS, CHINESE_NOT_ALLOWED_MSG);
+        }
         Date now = DateTimeUtils.now();
 
         Long cacheEvictProjectId = null;
@@ -286,6 +294,9 @@ public class EnvironmentController {
                 for (EnvironmentUser environmentUser : environmentUsers) {
                     environmentIds.add(environmentUser.getEnvironmentId());
                 }
+            }
+            if (environmentIds.isEmpty()) {
+                return R.error(NO_ENVIRONMENT_PRI_STATUS, NO_ENVIRONMENT_PRI_MSG);
             }
         }
 

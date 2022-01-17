@@ -22,6 +22,8 @@ import com.baidu.brcc.service.base.GenericService;
 import com.baidu.brcc.domain.Project;
 import com.baidu.brcc.domain.ProjectExample;
 
+import java.util.List;
+
 public interface ProjectService extends GenericService<Project, Long, ProjectExample> {
 
     /**
@@ -34,6 +36,8 @@ public interface ProjectService extends GenericService<Project, Long, ProjectExa
     int deleteCascadeById(Long projectId);
 
     Project selectByName(String name);
+
+    List<Project> selectByProductId(Long productId);
 
 
 }
