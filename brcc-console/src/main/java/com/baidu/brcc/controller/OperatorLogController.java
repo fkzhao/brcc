@@ -39,7 +39,7 @@ import com.baidu.brcc.service.OperationLogService;
  * 操作日志相关接口
  */
 @RestController
-@RequestMapping("console/logs")
+@RequestMapping(path = {"console/logs", "logs"})
 public class OperatorLogController {
     @Autowired
     private OperationLogService operationLogService;
@@ -69,7 +69,7 @@ public class OperatorLogController {
         }
         int offset = (pageNo - 1) * pageSize;
         Pagination<OperationLog> pagination = operationLogService.pagination(OperationLogExample.newBuilder()
-                .orderByClause("id desc")
+                .orderByClause("`id` desc")
                 .start(offset)
                 .limit(pageSize)
                 .build()

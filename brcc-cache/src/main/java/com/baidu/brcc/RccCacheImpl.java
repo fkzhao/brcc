@@ -585,25 +585,6 @@ public class RccCacheImpl implements RccCache {
         }
         return map.values().stream().filter(Objects :: nonNull).collect(Collectors.toList());
     }
-
-    @Override
-    public Map<String,ConfigItem> getItemMap(Long versionId) {
-        Map<String, ConfigItem> map = new HashMap<>();
-        if (!cache.cacheEnable() || versionId == null || versionId <= 0) {
-            return map;
-        }
-        String itemVersionIdKey = getItemVersionIdKey(versionId);
-        RetryActionWithTwoParam<String, Class<ConfigItem>, Map<String, ConfigItem>> action =
-                new RetryActionWithTwoParam<>(
-                        "hgetall",
-                        retryTimes,
-                        itemVersionIdKey,
-                        ConfigItem.class
-                );
-        map = action.action((String key, Class<ConfigItem> type) -> cache.hgetall(key, type));
-        return map;
-    }
-
     @Override
     public List<ApiItemVo> getItems(Long versionId, List<String> names) {
         if (!cache.cacheEnable() || versionId == null || versionId <= 0 || isEmpty(names)) {
@@ -887,37 +868,6 @@ public class RccCacheImpl implements RccCache {
                 retryTimes,
                 itemVersionIdKey,
                 map
-        ).action(
-                (String key, Map kvs) -> cache.hmset(key, kvs)
-        );
-    }
-
-    @Override
-    public void loadItemMap(Long versionId, Map<String, ConfigItem> itemMap, boolean clear) {
-        if (!cache.cacheEnable() || versionId == null || versionId <= 0) {
-            return;
-        }
-        String itemVersionIdKey = getItemVersionIdKey(versionId);
-
-        if (clear) {
-            // 删除
-            new RetryActionWithOneParam<List<String>, Long>(
-                    "evict",
-                    retryTimes,
-                    Arrays.asList(itemVersionIdKey)
-            ).action(
-                    (List<String> keys) -> cache.evict(keys)
-            );
-        }
-        // put
-        if (isEmpty(itemMap)) {
-            return;
-        }
-        new RetryActionWithTwoParam<String, Map, Boolean>(
-                "hmset",
-                retryTimes,
-                itemVersionIdKey,
-                itemMap
         ).action(
                 (String key, Map kvs) -> cache.hmset(key, kvs)
         );

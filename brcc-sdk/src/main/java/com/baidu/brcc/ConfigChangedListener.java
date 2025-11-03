@@ -31,13 +31,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.baidu.brcc.model.ChangedConfigItem;
 import com.baidu.brcc.model.VersionVo;
 import com.baidu.brcc.utils.StringUtils;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Configuration changed listener.
@@ -45,11 +42,8 @@ import com.baidu.brcc.utils.StringUtils;
  * @author xiemalin
  * @since 1.0.0.0
  */
+@Slf4j
 public class ConfigChangedListener implements Runnable {
-    /**
-     * Logger for this class
-     */
-    private static final Logger LOGGER = LoggerFactory.getLogger(ConfigChangedListener.class);
 
     /**
      * if true means listener thread is stopped.
@@ -76,7 +70,7 @@ public class ConfigChangedListener implements Runnable {
         if (es == null) {
             ThreadFactory threadFactory = new ThreadFactory() {
                 @Override
-                public Thread newThread(@NotNull Runnable r) {
+                public Thread newThread(Runnable r) {
                     return new Thread(r, "ConfigChangedListener-Thread");
                 }
             };
@@ -146,7 +140,7 @@ public class ConfigChangedListener implements Runnable {
         try {
             configItems = configLoader.getFromCC();
         } catch (Exception ex) {
-            LOGGER.warn("load from cc fail.");
+            log.warn("load from cc fail.");
             // 调用异常
             return new ArrayList<>(0);
         }
@@ -206,12 +200,12 @@ public class ConfigChangedListener implements Runnable {
                 // check version tag. tag should not be null
                 String versionTag = configLoader.getLastCheckSum();
                 if (StringUtils.isBlank(versionTag)) {
-                    LOGGER.warn("Found local version tag is null, it could be a error "
+                    log.warn("Found local version tag is null, it could be a error "
                             + "from configuration center server. ");
                     continue;
                 } else {
-                    if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("Checking version tag to server... current tag:" + versionTag);
+                    if (log.isDebugEnabled()) {
+                        log.debug("Checking version tag to server... current tag:" + versionTag);
                     }
                 }
 
@@ -224,7 +218,7 @@ public class ConfigChangedListener implements Runnable {
                     configLoader.setLastCheckSum(checkSum);
                 }
             } catch (Exception e) {
-                LOGGER.warn(
+                log.warn(
                         "Change verify callback failed will retry at next interval. error message:" + e.getMessage(),
                         e);
             }
